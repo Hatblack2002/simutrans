@@ -363,3 +363,28 @@ C++ standard: 14. `MULTI_THREAD`: official Android gradle keeps it OFF — we st
     IDs from full JSON, not from interleaved rg output.
   - Upstream also ships `.github/workflows/nightly-android.yml` (their own Android
     nightly, now disabled) — read it in Phase 2 for their asset/pak64 recipe.
+
+- **2026-10-26 — Incident: "the app closes immediately on open" (person's report) — root cause found & fixed**
+  - Symptom: installed release APK closes instantly on launch; ZERO `device-log`
+    issues arrived — consistent with a crash happening BEFORE `Diag.init()` runs.
+  - Root cause: `AndroidManifest.xml` declares launcher activity `.SimutransActivity`,
+    but that Java class was never written. Dex proof on the downloaded release APK:
+    the bytes `SimutransActivity` appear nowhere in classes*.dex. Android cannot
+    instantiate the launchable activity → instant close; our diag entry point never
+    executes → diagnostic blindness. Green CI could not catch it: aapt/apksigner
+    verify the manifest and signing, not that manifest-referenced classes exist
+    in the dex.
+  - Fix (3 parts):
+    1) Added `SimutransActivity.java` (extends `org.libsdl.app.SDLActivity`):
+       calls `Diag.init(this)` BEFORE `super.onCreate` (packages previous
+       boot-failure + installs Java crash handler before anything else can throw),
+       then `Diag.startUploader(this)` right after.
+    2) `Diag.startUploader` now uploads anything pending IMMEDIATELY (reports from
+       previous crashed boots), then waits for first frame as before — removes the
+       "starved uploader" blind spot for immediate-close failure modes.
+    3) CI Verify step now extracts the launchable activity from `aapt dump badging`,
+       builds its JVM descriptor (`Lio/github/.../SimutransActivity;`) and greps the
+       APK's classes*.dex — a missing launchable activity fails the build forever.
+  - Expected next: person reinstalls from the SAME link (same fixed keystore +
+    higher versionCode = GITHUB_RUN_NUMBER → in-place upgrade, no uninstall
+    needed); the app should show the color test screen with Spanish hints.

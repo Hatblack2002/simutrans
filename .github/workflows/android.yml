@@ -58,6 +58,21 @@ jobs:
           "$BT/aapt" dump badging "$APK" | sed -n '1,30p' | tee apk-badging.txt
           # fixed debug keystore => every build installs over the previous one
           "$BT/apksigner" verify --print-certs "$APK" | tee apk-certs.txt | head -5
+          # Guard (phase-1 incident "app closes instantly on open"): the
+          # launchable activity declared in the manifest MUST exist in the dex.
+          ACT="$("$BT/aapt" dump badging "$APK" | sed -n "s/^launchable-activity: name='\([^']*\)'.*/\1/p" | head -1)"
+          echo "launchable activity: $ACT"
+          test -n "$ACT"
+          DESC="L$(echo "$ACT" | tr '.' '/')i"
+          DESC="${DESC%i};"
+          echo "dex descriptor to find: $DESC"
+          rm -rf dexcheck && mkdir dexcheck
+          unzip -q "$APK" 'classes*.dex' -d dexcheck
+          if ! grep -aqF "$DESC" dexcheck/classes*.dex; then
+            echo "FATAL: launchable activity is missing from the dex (instant-close bug)"
+            exit 1
+          fi
+          echo "launchable activity present in dex: OK"
 
       - name: Publish APK to GitHub Release (latest-debug, stable filename)
         env:

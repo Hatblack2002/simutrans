@@ -107,13 +107,19 @@ public final class Diag {
         new Thread(() -> DiagUploader.uploadPending(c), "diag-upload-now").start();
     }
 
-    /** Background uploader: waits for a complete boot, writes the one-per-version
-     *  boot-ok report, then uploads everything pending. */
+    /** Background uploader: FIRST ships anything already pending (reports from
+     *  previous crashed boots — must not wait on this launch's progress, see the
+     *  phase-1 immediate-close incident), THEN waits for a complete boot, writes
+     *  the one-per-version boot-ok report, and uploads it. */
     public static synchronized void startUploader(Context c) {
         if (sUploaderThread != null && sUploaderThread.isAlive()) return;
         sUploaderThread = new Thread(() -> {
             final Context app = c.getApplicationContext();
-            // Wait for native to remove the boot flag (= first frame drawn) — max 120 s.
+            // 1) Upload pending reports from previous crashed boots right now.
+            //    In the immediate-close failure mode every launch dies early;
+            //    waiting for the first frame would starve the uploader forever.
+            DiagUploader.uploadPending(app);
+            // 2) Wait for native to remove the boot flag (= first frame drawn) — max 120 s.
             for (int i = 0; i < 240; i++) {
                 if (!bootFlag(app).exists()) break;
                 try { Thread.sleep(500); } catch (InterruptedException e) { return; }
