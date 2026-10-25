@@ -340,3 +340,26 @@ C++ standard: 14. `MULTI_THREAD`: official Android gradle keeps it OFF — we st
     translations) and `*.bdf` (fonts) — they are fetched at build time
     (`tools/get_lang_files.sh`), and `*.zip` ignores any committed pak128 → pak128 and
     text/font data must be fetched in CI into build-time assets, never committed.
+
+- **2026-10-26 — Phase 1 CI: GREEN on first attempt (run 40229634704)**
+  - All 13 steps green. Log evidence (run1 logs zip):
+    `BUILD SUCCESSFUL in 1m 9s`; APK contains `lib/arm64-v8a/libmain.so` (47 216 B),
+    `lib/arm64-v8a/libSDL2.so` (1 931 080 B), `libc++_shared.so` (1 374 336 B);
+    aapt: `package: name='io.github.hatblack2002.simutrans' versionCode='1'
+    versionName='0.1.1+fe67b10'`, `native-code: 'arm64-v8a'`;
+    apksigner: `Signer #1 certificate DN: CN=Android Debug, O=Simutrans Android Port, C=US`
+    (our fixed keystore). Local binary checks of the downloaded release APK:
+    `SDL_main` and `JNI_OnLoad` GLOBAL in libmain.so dynsym; every DT_NEEDED of
+    libmain.so/libSDL2.so resolved (APK or system); APK sha256
+    `a5b3f195d87f397394c349d242c8aaa5e174fa85c762ce1f5ce1a80ebd1430e8` (3 550 506 B).
+  - Incident + fix: the inherited upstream workflows (10 files: Nightly win/mac/ubuntu/
+    makeobj/tests + update-nightly-release) fired on our push and one failed
+    (winGDI-32). All were DISABLED via API (`state: disabled_manually`, zero diff).
+  - Incident (mine) + recovery: while deleting the stale upstream "Nightly" release in
+    the fork I deleted our own fresh `latest-debug` release instead (asset gone; tag
+    still exists). Recovery: the next CI run's Publish step re-creates the release on
+    the existing tag and re-uploads the APK (workflow is idempotent that way — by
+    design). Stale "Nightly" release+tag then deleted properly. Lesson: verify release
+    IDs from full JSON, not from interleaved rg output.
+  - Upstream also ships `.github/workflows/nightly-android.yml` (their own Android
+    nightly, now disabled) — read it in Phase 2 for their asset/pak64 recipe.
