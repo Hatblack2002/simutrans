@@ -1,0 +1,59 @@
+apply plugin: 'com.android.application'
+
+// DIAG_TOKEN arrives at build time from CI secret: -PdiagToken=... (empty string = uploader disabled)
+def diagToken = (project.findProperty('diagToken') ?: System.getenv('DIAG_TOKEN') ?: '').toString()
+
+android {
+    namespace 'io.github.hatblack2002.simutrans'
+    compileSdk 36
+    ndkVersion '29.0.14206865'
+
+    defaultConfig {
+        applicationId 'io.github.hatblack2002.simutrans'
+        minSdk 24
+        targetSdk 33
+        // Monotonic across CI builds -> allows in-place upgrade installs
+        versionCode ((System.getenv('GITHUB_RUN_NUMBER') ?: '1') as Integer)
+        versionName "0.1.${System.getenv('GITHUB_RUN_NUMBER') ?: 'local'}+${(System.getenv('GITHUB_SHA') ?: 'dev').take(7)}"
+        buildConfigField 'String', 'DIAG_TOKEN', "\"${diagToken}\""
+        buildConfigField 'String', 'DIAG_REPO', '"Hatblack2002/simutrans"'
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_APP_PLATFORM=android-24', '-DANDROID_STL=c++_shared'
+                abiFilters 'arm64-v8a'
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path 'src/main/cpp/CMakeLists.txt'
+            version '3.31.6'
+        }
+    }
+
+    // ONE fixed keystore for every build: upgrades install over old versions
+    // (the classic "App not installed" failure mode). Debug variant only, as spec'd.
+    signingConfigs {
+        fixeddebug {
+            storeFile file("$rootDir/keystore/debug.keystore")
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.fixeddebug
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    lint {
+        abortOnError false
+    }
+}

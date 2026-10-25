@@ -41,3 +41,9 @@ vcpkg_installed/
 UpgradeLog.htm
 src/linux/com.simutrans.Simutrans.metainfo.xml
 src/android/AndroidAppSettings.cfg
+
+# --- android port (android/ gradle project) ---
+.gradle/
+.cxx/
+android/local.properties
+*.iml

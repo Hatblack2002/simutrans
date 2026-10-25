@@ -289,3 +289,54 @@ C++ standard: 14. `MULTI_THREAD`: official Android gradle keeps it OFF — we st
   - Verified official pak128 URL + size (93 MB zip / ~408 MB unpacked) and compatibility
     (125.0up vs master 125.0.2 Nightly). Decision: bundle in APK.
   - Wrote this file. No source changes made.
+
+- **2026-10-26 — Phase 0 published + Phase 1 (pipeline proof) implemented**
+  - The person delivered a GitHub token (classic PAT, full scopes incl. repo/workflow) — the
+    one-time setup is DONE, done by the agent, not the person:
+    - Fork created: **Hatblack2002/simutrans** (branch `android-port` pushed; Phase 0 notes live).
+    - Pre-existing stub repo `Hatblack2002/Simutrans` (a prior attempt: green-CI workflow but
+      NEVER a Release upload — that is why the person never received an APK) renamed to
+      `simutrans-attempt-1`, preserved for reference. Its workflow file was studied:
+      `android-actions/setup-android@v3` + explicit `sdkmanager` pins proven green on
+      ubuntu-24.04; its last commits are real lessons (SIGPIPE under pipefail, obsolete SDK
+      packages, abiFilters rewrite, debug-variant prebuilt path).
+    - Actions secret `DIAG_TOKEN` set via API (libsodium sealed box) from the same token.
+      SECURITY NOTE: the token is a full-scope classic PAT — fine for this private-ish fork
+      during bring-up; before any wider APK distribution, replace with a fine-grained PAT
+      scoped to Issues:RW on this repo only (spec §5.2's original plan).
+  - Phase 1 artifacts (all under `android/` + `.github/workflows/android.yml`):
+    - Gradle project mirroring the official android-project pins: AGP 8.13.0, wrapper 8.13,
+      NDK 29.0.14206865, SDK CMake 3.31.6, compileSdk 36, minSdk 24, targetSdk 33,
+      Java 21 (Temurin), `abiFilters 'arm64-v8a'`, `ANDROID_STL=c++_shared`.
+    - SDL2 vendored by exact pin `6ad5a966` (FetchContent tarball + SHA256) — same commit
+      as the official project's submodule; SDL Java glue (9 files, org.libsdl.app) vendored
+      from that same commit; NO AndroidX anywhere.
+    - `libmain.so` trivial app: SDL2 SOFTWARE path only (window surface, no renderer GL),
+      color screen; 1 finger = color change; 2 fingers = upload diagnostics now;
+      3 fingers = deliberate SIGSEGV (tests crash pipeline); BACK = clean quit.
+      On-screen Spanish hints via built-in 5x7 font (no accent glyphs needed).
+    - Diagnostics per spec §5: `diag/boot.log` markers (`app_start`…`first_frame_drawn`),
+      `diag/boot-in-progress` flag (survives a dead boot → `boot-failure` report on next
+      launch), native crash handler (sigaction on alt stack; SEGV/ABRT/BUS/FPE/ILL;
+      async-signal-safe manual formatting; `_Unwind_Backtrace` + `dladdr`; format
+      `FATAL SIGNAL <n> (addr=…, pc=…)`; re-raises after writing
+      `diag/pending/native-crash-<ts>.md`), Java uncaught-exception handler
+      (`java-crash-*.md`), one-per-versionCode `boot-ok` report, `DiagUploader`
+      (HttpsURLConnection → POST /repos/Hatblack2002/simutrans/issues, label `device-log`,
+      body ≤ 60 000 chars truncated-in-middle, HTTP 201 → delete file, ≤ 5 per run,
+      empty token ⇒ disabled but files kept). Token + repo injected via `BuildConfig`
+      from `-PdiagToken=` in CI.
+    - Fixed debug keystore committed `android/keystore/debug.keystore` (alias
+      `androiddebugkey`, pass `android`) → every build installs over the previous one;
+      `versionCode = GITHUB_RUN_NUMBER`; `versionName = 0.1.<run>+<sha>`.
+    - CI `.github/workflows/android.yml`: push android-port + dispatch;
+      `contents: write`; pinned action SHAs (checkout v4.4.0, setup-java v4.9.1,
+      setup-android v3.2.2, upload-artifact v4.6.2); sdkmanager installs exact NDK/CMake;
+      build does NOT require DIAG_TOKEN; verifies APK (`libmain.so`/`libSDL2.so`/
+      `libc++_shared.so` present, aapt badging, apksigner cert); publishes GitHub
+      Release tag `latest-debug` (prerelease) with STABLE filename
+      `simutrans-android-debug.apk`; artifact + logs always uploaded.
+  - Discovery affecting Phase 2: upstream `.gitignore` ignores `/simutrans/text` (all
+    translations) and `*.bdf` (fonts) — they are fetched at build time
+    (`tools/get_lang_files.sh`), and `*.zip` ignores any committed pak128 → pak128 and
+    text/font data must be fetched in CI into build-time assets, never committed.
