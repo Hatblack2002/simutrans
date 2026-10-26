@@ -138,6 +138,8 @@ int main(int argc, char* argv[]) {
     int fingersDown = 0;
     int maxFingers = 0;
     int pulse = 0;
+    int frame = 0;
+    char statusText[96] = "ENVIO: ESPERA";
 
     while (!quit) {
         SDL_Event e;
@@ -196,7 +198,6 @@ int main(int argc, char* argv[]) {
             char* o4 = l4; const char* i4 = "3 DEDOS: PRUEBA DE CIERRE (LA APP SE CIERRA)";
             while ((*o4++ = *i4++));
         }
-
         int y = screen->h - 140;
         draw_text(screen, l1, 30, y, fg, 1);
         draw_text(screen, l2, 30, y + 32, fg, 1);
@@ -207,6 +208,18 @@ int main(int argc, char* argv[]) {
         draw_text(screen, c.name, 30, 40, panel, 1);
         SDL_Rect bar{ (int)((pulse++ * 13) % (screen->w - 200)), 20, 180, 8 };
         SDL_FillRect(screen, &bar, panel);
+
+        // upload status, top-right corner (polled once per second via JNI)
+        if (frame % 30 == 0) {
+            const char* st = diag::upload_status();
+            int i = 0;
+            for (; i < 95 && st[i]; i++) statusText[i] = st[i];
+            statusText[i] = '\0';
+        }
+        int stLen = 0;
+        while (statusText[stLen]) stLen++;
+        draw_text(screen, statusText, screen->w - stLen * 14 - 30, 40, panel, 1);
+        frame++;
 
         if (SDL_UpdateWindowSurface(win) == 0 && !firstFrame) {
             firstFrame = true;

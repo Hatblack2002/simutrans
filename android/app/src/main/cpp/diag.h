@@ -18,6 +18,10 @@ void boot_first_frame();
 // Trigger Java-side upload now (2-finger gesture). Best effort.
 void request_upload();
 
+// Current on-screen upload status from Java ("ENVIO: ..."). Never null;
+// returns a font-safe ASCII string. Poll at most ~1/s.
+const char* upload_status();
+
 } // namespace diag
 
 #endif // SIMUTRANS_ANDROID_DIAG_H

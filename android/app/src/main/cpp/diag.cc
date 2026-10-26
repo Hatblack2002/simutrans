@@ -25,10 +25,11 @@ static char g_boot_log[512];
 static char g_flag[512];
 static char g_pending[512];
 
-// JNI cache for diag::request_upload()
+// JNI cache for diag::request_upload() / diag::upload_status()
 static JavaVM* g_vm = nullptr;
 static jclass g_diagClass = nullptr;
 static jmethodID g_diagRequest = nullptr;
+static jmethodID g_diagStatus = nullptr;
 
 // async-signal-safe helpers -------------------------------------------------
 static size_t sputs(char* dst, size_t n, size_t pos, const char* s) {
@@ -177,6 +178,8 @@ extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
         g_diagClass = (jclass)env->NewGlobalRef(c);
         g_diagRequest = env->GetStaticMethodID(g_diagClass, "requestUpload", "()V");
         if (env->ExceptionCheck()) { env->ExceptionClear(); g_diagRequest = nullptr; }
+        g_diagStatus = env->GetStaticMethodID(g_diagClass, "uploadStatus", "()Ljava/lang/String;");
+        if (env->ExceptionCheck()) { env->ExceptionClear(); g_diagStatus = nullptr; }
     }
     return JNI_VERSION_1_6;
 }
@@ -231,4 +234,24 @@ void diag::request_upload() {
         }
     }
     LOGW("request_upload: no cached JNI; skipping");
+}
+
+const char* diag::upload_status() {
+    static char status[96] = "ENVIO: ESPERA";
+    if (!g_diagClass || !g_diagStatus) return status;
+    JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
+    if (!env) return status;
+    jstring js = (jstring)env->CallStaticObjectMethod(g_diagClass, g_diagStatus);
+    if (env->ExceptionCheck()) { env->ExceptionClear(); return status; }
+    if (js == nullptr) return status;
+    const char* s = env->GetStringUTFChars(js, nullptr);
+    if (s == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return status;
+    }
+    size_t i = 0;
+    for (; i < sizeof(status) - 1 && s[i]; i++) status[i] = s[i];
+    status[i] = '\0';
+    env->ReleaseStringUTFChars(js, s);
+    return status;
 }

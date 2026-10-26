@@ -31,6 +31,9 @@ public final class Diag {
     private static final String TAG = "simutrans-diag";
     private static Context sApp = null;
     private static Thread sUploaderThread = null;
+    /** On-screen upload status (read by native each second; ASCII, font-safe). */
+    private static volatile String sUploadStatus = "ENVIO: ESPERA";
+    private static volatile boolean sEverUploaded = false;
 
     private Diag() {}
 
@@ -107,10 +110,21 @@ public final class Diag {
         new Thread(() -> DiagUploader.uploadPending(c), "diag-upload-now").start();
     }
 
+    /** On-screen status, polled by native code (JNI) once per second. */
+    public static String uploadStatus() {
+        return sUploadStatus;
+    }
+
+    static void setUploadStatus(String s) {
+        sUploadStatus = s;
+        Log.i(TAG, s);
+    }
+
     /** Background uploader: FIRST ships anything already pending (reports from
      *  previous crashed boots — must not wait on this launch's progress, see the
      *  phase-1 immediate-close incident), THEN waits for a complete boot, writes
-     *  the one-per-version boot-ok report, and uploads it. */
+     *  the one-per-version boot-ok report, uploads it, and KEEPS RETRYING every
+     *  60 s while the process lives (flaky-network insurance). */
     public static synchronized void startUploader(Context c) {
         if (sUploaderThread != null && sUploaderThread.isAlive()) return;
         sUploaderThread = new Thread(() -> {
@@ -135,6 +149,12 @@ public final class Diag {
                 }
             }
             DiagUploader.uploadPending(app);
+            // 3) Keep retrying while the app is open: rescues uploads that fail
+            //    on a bad moment (no network yet, DNS hiccup, ...).
+            while (true) {
+                try { Thread.sleep(60000); } catch (InterruptedException e) { return; }
+                DiagUploader.uploadPending(app);
+            }
         }, "diag-uploader");
         sUploaderThread.start();
     }
