@@ -14,7 +14,9 @@ android {
         targetSdk 33
         // Monotonic across CI builds -> allows in-place upgrade installs
         versionCode ((System.getenv('GITHUB_RUN_NUMBER') ?: '1') as Integer)
-        versionName "0.2.${System.getenv('GITHUB_RUN_NUMBER') ?: 'local'}+${(System.getenv('GITHUB_SHA') ?: 'dev').take(7)}"
+        // First complete-port release; bump manually on future releases.
+        // (build/commit traceability stays via versionCode -> CI run -> commit)
+        versionName "1.0.0"
         buildConfigField 'String', 'DIAG_TOKEN', "\"${diagToken}\""
         buildConfigField 'String', 'DIAG_REPO', '"Hatblack2002/simutrans"'
         externalNativeBuild {
