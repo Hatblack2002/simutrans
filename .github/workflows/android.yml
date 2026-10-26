@@ -34,6 +34,24 @@ jobs:
           sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;35.0.0" "cmake;3.31.6" "ndk;29.0.14206865" >/dev/null
           yes | sdkmanager --licenses >/dev/null || true
 
+      - name: Prepare assets (pak128 + base game data)
+        run: |
+          set -euxo pipefail
+          mkdir -p android/app/src/main/assets
+          # pak128 2.10.3 for 125.0 up — URL straight from src/paksetinfo.h (the
+          # game's own generated pakset registry), not a random mirror.
+          curl -L --retry 3 -o pak128.zip "http://downloads.sourceforge.net/project/simutrans/pak128/pak128%20for%20ST%20125.0%20up%20%282.10.3%29/simupak128-2-1023-for-125-0up.zip"
+          SIZE=$(stat -c%s pak128.zip)
+          echo "pak128.zip size: $SIZE (expected ~97,565,449)"
+          if [ "$SIZE" -lt 90000000 ]; then echo "FATAL: pak128.zip too small"; exit 1; fi
+          unzip -t pak128.zip > /dev/null
+          unzip -l pak128.zip | head -8 | tee pak128-listing.txt
+          mv pak128.zip android/app/src/main/assets/pak128.zip
+          # base game data: config/, font/ (BDF fallback), text/ (all languages
+          # incl. es.tab), themes/, script/, ai/, music/ — all git-tracked.
+          cp -r simutrans android/app/src/main/assets/simutrans
+          du -sh android/app/src/main/assets/*
+
       - name: Build debug APK (arm64-v8a only)
         working-directory: android
         run: |
@@ -54,6 +72,10 @@ jobs:
           grep -q "lib/arm64-v8a/libmain.so"  apk-listing.txt
           grep -q "lib/arm64-v8a/libSDL2.so"  apk-listing.txt
           grep -q "lib/arm64-v8a/libc++_shared.so" apk-listing.txt
+          # Phase 2: the game must ship with its data
+          grep -q "assets/pak128.zip" apk-listing.txt
+          grep -q "assets/simutrans/config/simuconf.tab" apk-listing.txt
+          grep -q "assets/simutrans/text/es.tab" apk-listing.txt
           BT="$ANDROID_HOME/build-tools/35.0.0"
           "$BT/aapt" dump badging "$APK" | sed -n '1,30p' | tee apk-badging.txt
           # fixed debug keystore => every build installs over the previous one
@@ -86,7 +108,7 @@ jobs:
             gh release create "$TAG" -R "$GITHUB_REPOSITORY" --prerelease \
               --target "$GITHUB_SHA" \
               --title "Simutrans Android - latest debug build" \
-              --notes "Automatic build from android-port. arm64-v8a, software renderer (SDL2). Fixed debug keystore: installs over previous builds. Internal versionCode = ${{ github.run_number }}."
+              --notes "Automatic build from android-port. FULL GAME: simutrans + pak128, arm64-v8a, SDL2 software rendering. Fixed debug keystore: installs over previous builds. First launch unpacks the game (a few minutes). Internal versionCode = ${{ github.run_number }}."
           fi
           gh release upload "$TAG" simutrans-android-debug.apk --clobber -R "$GITHUB_REPOSITORY"
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'
@@ -102,5 +124,6 @@ jobs:
             apk-listing.txt
             apk-badging.txt
             apk-certs.txt
+            pak128-listing.txt
           if-no-files-found: warn
           retention-days: 14

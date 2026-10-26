@@ -25,11 +25,14 @@ static char g_boot_log[512];
 static char g_flag[512];
 static char g_pending[512];
 
-// JNI cache for diag::request_upload() / diag::upload_status()
+// JNI cache for diag::request_upload() / diag::upload_status() /
+// diag::wait_for_assets()
 static JavaVM* g_vm = nullptr;
 static jclass g_diagClass = nullptr;
 static jmethodID g_diagRequest = nullptr;
 static jmethodID g_diagStatus = nullptr;
+static jclass g_actClass = nullptr;
+static jmethodID g_actAssetsReady = nullptr;
 
 // async-signal-safe helpers -------------------------------------------------
 static size_t sputs(char* dst, size_t n, size_t pos, const char* s) {
@@ -181,6 +184,15 @@ extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
         g_diagStatus = env->GetStaticMethodID(g_diagClass, "uploadStatus", "()Ljava/lang/String;");
         if (env->ExceptionCheck()) { env->ExceptionClear(); g_diagStatus = nullptr; }
     }
+    jclass a = env->FindClass("io/github/hatblack2002/simutrans/SimutransActivity");
+    if (a == nullptr) {
+        env->ExceptionClear();
+        LOGW("JNI_OnLoad: SimutransActivity not found; wait_for_assets will no-op");
+    } else {
+        g_actClass = (jclass)env->NewGlobalRef(a);
+        g_actAssetsReady = env->GetStaticMethodID(g_actClass, "assetsReady", "()Z");
+        if (env->ExceptionCheck()) { env->ExceptionClear(); g_actAssetsReady = nullptr; }
+    }
     return JNI_VERSION_1_6;
 }
 
@@ -254,4 +266,30 @@ const char* diag::upload_status() {
     status[i] = '\0';
     env->ReleaseStringUTFChars(js, s);
     return status;
+}
+
+void diag::wait_for_assets() {
+    if (!g_actClass || !g_actAssetsReady) {
+        LOGW("wait_for_assets: no cached JNI; proceeding");
+        return;
+    }
+    JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
+    if (!env) {
+        LOGW("wait_for_assets: no JNIEnv; proceeding");
+        return;
+    }
+    log("wait_assets_start");
+    for (int waited = 0; waited < 300; ++waited) {  // up to 5 minutes
+        jboolean ok = env->CallStaticBooleanMethod(g_actClass, g_actAssetsReady);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); break; }
+        if (ok) {
+            log("assets_ready");
+            return;
+        }
+        if (waited > 0 && waited % 10 == 0) {
+            LOGI("still waiting for assets (%d s)", waited);
+        }
+        SDL_Delay(1000);
+    }
+    log("assets_wait_timeout");
 }

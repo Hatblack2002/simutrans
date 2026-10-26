@@ -388,3 +388,95 @@ C++ standard: 14. `MULTI_THREAD`: official Android gradle keeps it OFF — we st
   - Expected next: person reinstalls from the SAME link (same fixed keystore +
     higher versionCode = GITHUB_RUN_NUMBER → in-place upgrade, no uninstall
     needed); the app should show the color test screen with Spanish hints.
+
+---
+
+## 2. Phase 1 acceptance — COMPLETE (2026-10-26)
+
+Device reports received end-to-end on the fork repo: boot-ok (build 3 & 4),
+boot-failure capture, three native-crash reports with full arm64 backtraces
+(SIGSEGV addr=0x0 from the deliberate 3-finger test, frames resolving into
+libmain.so SDL_main → exactly the planted null write). On-screen upload status
+(ENVIO:) shipped in v4 (9701030) after the issues-disabled incident.
+
+## 3. Phase 2 — the real game (2026-10-26)
+
+Person's directive (verbatim intent): stop shipping test screens; build the
+complete game; error capture stays (it is automatic — every crash ships itself
+to the repo on next launch).
+
+### 3.1 Architecture (all decisions re-verified against the tree this session)
+
+- libmain.so = the ENTIRE simutrans tree via the repo root CMakeLists.txt
+  (its `if(ANDROID) add_library(simutrans SHARED)` branch), OUTPUT_NAME=main.
+  SDL_main comes from simsys_s2.cc's `main()` (SDL_main.h renames it) — the
+  phase-1 main.cc test screen is deleted.
+- Deps, all but SDL2 linked STATICALLY into libmain.so:
+  - zlib → NDK system lib (sysroot ships zlib.h + libz.so at android-24);
+    provided as an INTERFACE target named ZLIB::ZLIB.
+  - bzip2 1.0.8 → vendored at android/app/src/main/cpp/bzip2 (7 .c + bzlib.h,
+    no cmake upstream; tarball sha256 ab5a03176e…c4a2269, verified locally).
+  - libpng 1.6.44 → FetchContent, its own CMakeLists, PNG_STATIC=ON
+    (sha256 60c4da1d…8b8ce8e, verified locally).
+  - freetype 2.13.3 → FetchContent, static, all FT_DISABLE_* deps on
+    (sha256 05503506…063289, verified locally).
+  - SDL2 → unchanged pin 6ad5a966… (shared, as in phase 1).
+- Options: SIMUTRANS_BACKEND=sdl2, MULTI_THREAD=OFF, ZSTD=OFF, FONTCONFIG=OFF,
+  UPNP=OFF, WARNINGS_AS_ERRORS=OFF, USE_REVISION=1 (deterministic; avoids git
+  probing at build time; revision is a label for offline play).
+- Debug-variant performance: AGP forces CMAKE_BUILD_TYPE=Debug and neither
+  CMake nor SimutransCompileOptions pass any -O level (=> clang -O0, unplayable
+  software renderer at 1440x3200). Forced CMAKE_C_FLAGS_DEBUG="-g -O2" and
+  CMAKE_CXX_FLAGS_DEBUG="-g -O2 -fno-limit-debug-info" globally in our
+  cpp/CMakeLists — the "debug" APK is only debug-SIGNED, not debug-SLOW.
+
+### 3.2 Upstream patches (2 files, both logged here per §2 rule 10)
+
+1. cmake/SimutransFindDependencies.cmake — the ANDROID branch now starts with
+   `if (NOT TARGET ZLIB::ZLIB)` and skips its whole prebuilt-sibling-dir import
+   block (../zlib, ../bzip2, …, fluidsynth family, OpenMP REQUIRED) when our
+   build already provided real targets with those names. Balance checked
+   (if/endif depth 0). Desktop branch untouched.
+2. src/simutrans/sys/simsys_s2.cc — three `#ifdef __ANDROID__` hunks:
+   a. `#include "diag.h"` after the SDL include block;
+   b. dr_flush(): first presented frame → diag::boot_first_frame() (clears the
+      boot flag; static bool guard);
+   c. main(): diag::boot_init() + log(native_main) + diag::wait_for_assets()
+      before sysmain() — the game touches NO file before the Java-side
+      first-run unpack finishes.
+
+### 3.3 First-run asset pipeline
+
+- CI fetches pak128 (URL from src/paksetinfo.h — "pak128 2.10.3 for 125.0 up",
+  97,565,449 bytes) into assets/pak128.zip (noCompress) and copies the git-
+  tracked base data dir simutrans/ (config, font BDFs, text incl. es.tab,
+  themes, script, ai, music) into assets/simutrans/.
+- AssetInstaller.java (background thread, Spanish progress overlay added via
+  addContentView): copies assets/simutrans/** → filesDir/**, unzips
+  pak128.zip → filesDir/pak128/** with %-progress; zip layout normalized
+  (optional "simutrans/" wrapper stripped, everything forced under pak128/ —
+  mirrors upstream unpak.sh logic). Markers: .assets-base-<versionCode> and
+  .assets-pak128-<versionCode>-<zipSize> → upgrades re-copy base (seconds) and
+  re-unpack the pak only when the bundled zip actually changes.
+- Activity: getArguments() = -autodpi -fullscreen -log -debug 2 -objects pak128/;
+  onDestroy → System.exit(0) (same as official app: C++ globals cannot re-init);
+  assetsReady() polled by native.
+- Failure path: installer exception → overlay shows the error + diag report
+  "assets-failure" → native 5-min timeout → game's own pakset-missing fatal
+  window → boot-failure report on next launch. Every failure self-reports.
+
+### 3.4 Diagnostics in the game build
+
+diag.cc/h unchanged except: +wait_for_assets() (JNI-cached
+SimutransActivity.assetsReady, 1 s poll, 5 min cap, markers wait_assets_start /
+assets_ready / assets_wait_timeout in boot.log); JNI_OnLoad also caches the
+activity class. The 2/3-finger test gestures are gone with main.cc — touch is
+now the game's own (upstream: tap=click, drag=pan, long-press=right-click,
+pinch=zoom, 3-finger drag=map scroll).
+
+### 3.5 Build/size expectations
+
+~950 translation units of the game + SDL2 + 3 static deps on 4 vCPU: expect
+15–25 min CI (was ~2 min). APK ≈ 12 MB base (compressed) + 93 MB pak zip
+(stored) + libs ≈ ~110 MB — GitHub Release, fine. First launch unpacks ≈ 400 MB
+to internal storage (S20: plenty), expect 1–3 min with the progress overlay.

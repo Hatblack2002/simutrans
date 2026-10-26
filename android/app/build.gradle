@@ -14,7 +14,7 @@ android {
         targetSdk 33
         // Monotonic across CI builds -> allows in-place upgrade installs
         versionCode ((System.getenv('GITHUB_RUN_NUMBER') ?: '1') as Integer)
-        versionName "0.1.${System.getenv('GITHUB_RUN_NUMBER') ?: 'local'}+${(System.getenv('GITHUB_SHA') ?: 'dev').take(7)}"
+        versionName "0.2.${System.getenv('GITHUB_RUN_NUMBER') ?: 'local'}+${(System.getenv('GITHUB_SHA') ?: 'dev').take(7)}"
         buildConfigField 'String', 'DIAG_TOKEN', "\"${diagToken}\""
         buildConfigField 'String', 'DIAG_REPO', '"Hatblack2002/simutrans"'
         externalNativeBuild {
@@ -47,6 +47,12 @@ android {
         debug {
             signingConfig signingConfigs.fixeddebug
         }
+    }
+
+    // 93 MB pak128.zip: skip double compression (faster build, openFd works
+    // on uncompressed assets so the installer can read the exact size)
+    androidResources {
+        noCompress 'zip'
     }
 
     buildFeatures {
